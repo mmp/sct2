@@ -1,8 +1,8 @@
 
 Simple golang implementation of a parser for the SCT2 file format as used
 in VATSIM.  Based on the specification in the VRC documentation
-([1](https://vrc.rosscarlson.dev/docs/doc.php?page=appendix_g),
-[2](https://vrc.rosscarlson.dev/docs/doc.php?page=appendix_f]).
+([(1)](https://vrc.rosscarlson.dev/docs/doc.php?page=appendix_g),
+[(2)](https://vrc.rosscarlson.dev/docs/doc.php?page=appendix_f])).
 
 Basic usage:
 ```go
