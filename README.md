@@ -21,3 +21,5 @@ Basic usage:
 	}
 ```
 
+The provided `sct2print` utility parses a SCT2 file and then prints its
+contents to standard output.
