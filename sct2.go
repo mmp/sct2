@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // SectorFile is a structure that wraps up all of the items processed by
@@ -451,7 +450,8 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 	}
 
 	// Separate out the sections so they can be parsed in parallel.
-	// Precondition: |section| is set above to the initial one
+	// Precondition: |section| is set above to the initial section and the
+	// parser is ready to give its first line.
 	sectionLines := make(map[string][][]byte)
 	var currentSectionLines [][]byte
 	for {
