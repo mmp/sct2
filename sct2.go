@@ -737,7 +737,7 @@ func parseSection(section string, lines [][]byte, p *sectorFileParser, sectorFil
 			if len(f) != 5 {
 				// WAR for error (I think) in ZNY sct file.
 				fmt.Fprintf(os.Stderr, "Skipping malformed GEO line: %s\n", line)
-				return
+				continue
 			}
 
 			seg := parseseg(f[0:4])
