@@ -524,7 +524,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			var cs ColoredSegment
 			cs.P[0] = parseloc(f[0:2])
 			cs.P[1] = parseloc(f[2:4])
-			if len(fields) == 5 {
+			if len(f) == 5 {
 				cs.Color = string(f[4])
 			}
 			ns[len(ns)-1].Segs = append(ns[len(ns)-1].Segs, cs)
@@ -673,13 +673,12 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			})
 
 		case "[GEO]":
-			first := true
 			group = parsegroup(func(line []byte) {
 				f := fields(line)
-				if first {
-					// WTF, skip over TXKF in ZNY sector file
-					f = f[1:]
-					first = false
+				if len(f) != 5 {
+					// WAR for error (I think) in ZNY sct file.
+					fmt.Fprintf(os.Stderr, "Skipping malformed GEO line: %s\n", line)
+					return
 				}
 
 				seg := parseseg(f[0:4])
