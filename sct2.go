@@ -417,7 +417,6 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		if string(f[0]) != "#define" {
 			p.SyntaxError("Expected #define for first token")
 		}
-		// TODO: check that f[2] is an integer
 
 		sectorFile.Colors[string(f[1])] = int24ToRGB(p.atoi(f[2]))
 	}
@@ -525,8 +524,9 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			var cs ColoredSegment
 			cs.P[0] = parseloc(f[0:2])
 			cs.P[1] = parseloc(f[2:4])
-			//if len(fields) == 5
-			// TODO: color
+			if len(fields) == 5 {
+				cs.Color = string(f[4])
+			}
 			ns[len(ns)-1].Segs = append(ns[len(ns)-1].Segs, cs)
 		})
 
