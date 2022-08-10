@@ -61,7 +61,7 @@ type Segment struct {
 
 type ColoredSegment struct {
 	Segment
-	Color RGB
+	Color string
 }
 
 // NamedPoints represents a sequence of positions with an associated name.
@@ -161,16 +161,14 @@ func (sf SectorFile) Write(w io.Writer) {
 
 	fmt.Fprintf(w, "\nGeo:\n")
 	for _, g := range sf.Geo {
-		fmt.Fprintf(w, "\t%s %s (%f, %f, %f)\n", g.P[0], g.P[1],
-			g.Color.R, g.Color.G, g.Color.B)
+		fmt.Fprintf(w, "\t%s %s (%s)\n", g.P[0], g.P[1], g.Color)
 	}
 
 	fmt.Fprintf(w, "\nSIDs:\n")
 	for _, sid := range sf.SIDs {
 		fmt.Fprintf(w, "\t%s:\n", sid.Name)
 		for _, seg := range sid.Segs {
-			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1],
-				seg.Color.R, seg.Color.G, seg.Color.B)
+			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1], seg.Color)
 		}
 	}
 
@@ -178,8 +176,7 @@ func (sf SectorFile) Write(w io.Writer) {
 	for _, sid := range sf.STARs {
 		fmt.Fprintf(w, "\t%s:\n", sid.Name)
 		for _, seg := range sid.Segs {
-			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1],
-				seg.Color.R, seg.Color.G, seg.Color.B)
+			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1], seg.Color)
 		}
 	}
 
@@ -467,12 +464,6 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		s.P[1] = parseloc(tokens[2:4])
 		return s
 	}
-	parsecolor := func(token []byte) RGB {
-		if rgb, ok := sectorFile.Colors[string(token)]; ok {
-			return rgb
-		}
-		return int24ToRGB(p.atoi(token))
-	}
 
 	// For a group [FOO] in a sector file, call the provided callback with
 	// every line of text in the group definition.
@@ -692,8 +683,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 
 				seg := parseseg(f[0:4])
-				rgb := parsecolor(f[4])
-				sectorFile.Geo = append(sectorFile.Geo, ColoredSegment{seg, rgb})
+				sectorFile.Geo = append(sectorFile.Geo, ColoredSegment{seg, string(f[4])})
 			})
 
 		case "[REGIONS]":
