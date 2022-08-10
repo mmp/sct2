@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/mmp/sct2"
 )
@@ -22,12 +23,15 @@ func main() {
 			continue
 		}
 
+		start := time.Now()
 		sf, err := sct2.Parse(contents, fn, func(err string) {
 			fmt.Fprint(os.Stderr, err)
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %s", fn, err)
 		} else {
+			elapsed := time.Since(start)
+			fmt.Printf("Parsed file in %s\n", elapsed)
 			sf.Write(os.Stdout)
 		}
 	}

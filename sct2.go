@@ -13,6 +13,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // SectorFile is a structure that wraps up all of the items processed by
@@ -271,12 +273,13 @@ func (s Segment) String() string {
 // sectorFileParser
 
 type sectorFileParser struct {
-	file          []byte
-	filename      string
-	offset        int
-	lineno        int
-	line          []byte
-	errorCallback func(string)
+	file                   []byte
+	filename               string
+	offset                 int
+	lineno                 int
+	line                   []byte
+	vorMap, ndbMap, fixMap map[string]LatLong
+	errorCallback          func(string)
 }
 
 func (p *sectorFileParser) GetLine() ([]byte, error) {
@@ -319,7 +322,7 @@ func (p *sectorFileParser) SyntaxError(f string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func isGroupSeparator(s []byte) bool {
+func isSectionSeparator(s []byte) bool {
 	return len(s) > 0 && s[0] == '[' && strings.Index(string(s), "]") != -1
 }
 
@@ -414,11 +417,13 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 
 	p := &sectorFileParser{file: contents,
 		filename:      filename,
-		errorCallback: syntax}
-	locMap := make(map[string]LatLong)
+		errorCallback: syntax,
+		vorMap:        make(map[string]LatLong),
+		ndbMap:        make(map[string]LatLong),
+		fixMap:        make(map[string]LatLong)}
 
 	// Process #defines
-	var group []byte
+	var section []byte
 	for {
 		line, err := p.GetLine()
 		if err == io.EOF {
@@ -427,9 +432,9 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		if len(line) == 0 {
 			continue
 		}
-		if isGroupSeparator(line) {
+		if isSectionSeparator(line) {
 			// we're on to the regular sections
-			group = line
+			section = line
 			break
 		}
 
@@ -445,9 +450,72 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		sectorFile.Colors = append(sectorFile.Colors, nc)
 	}
 
+	// Separate out the sections so they can be parsed in parallel.
+	// Precondition: |section| is set above to the initial one
+	sectionLines := make(map[string][][]byte)
+	var currentSectionLines [][]byte
+	for {
+		line, err := p.GetLine()
+		if err == io.EOF {
+			break
+		}
+		if len(line) == 0 {
+			continue
+		}
+		if isSectionSeparator(line) {
+			// finish the current one
+			sectionLines[string(section)] = currentSectionLines
+			currentSectionLines = nil
+			section = line
+		} else {
+			// Don't bother if the line is entirely whitespace.
+			s := 0
+			for s < len(line) && isSpace(line[s]) {
+				s++
+			}
+			if s < len(line) {
+				currentSectionLines = append(currentSectionLines, line)
+			}
+		}
+	}
+
+	// Slightly tricky: we need to parse VORs, NDBs, and fixes first, since
+	// their names may be referred to to define locations in other sections.
+	var wg sync.WaitGroup
+	for _, section := range []string{"[VOR]", "[NDB]", "[FIXES]"} {
+		if lines, ok := sectionLines[section]; ok {
+			wg.Add(1)
+			go func(section string, lines [][]byte) {
+				parseSection(section, lines, p, sectorFile)
+				wg.Done()
+			}(section, lines)
+		}
+	}
+	wg.Wait()
+
+	for section, lines := range sectionLines {
+		if section == "[VOR]" || section == "[NDB]" || section == "[FIXES]" {
+			continue
+		}
+		wg.Add(1)
+		go func(section string, lines [][]byte) {
+			parseSection(section, lines, p, sectorFile)
+			wg.Done()
+		}(section, lines)
+	}
+	wg.Wait()
+
+	return sectorFile, nil
+}
+
+func parseSection(section string, lines [][]byte, p *sectorFileParser, sectorFile *SectorFile) {
 	vnfPos := func(t []byte) LatLong {
 		token := string(t)
-		if loc, ok := locMap[token]; ok {
+		if loc, ok := p.vorMap[token]; ok {
+			return loc
+		} else if loc, ok := p.ndbMap[token]; ok {
+			return loc
+		} else if loc, ok := p.fixMap[token]; ok {
 			return loc
 		} else {
 			p.SyntaxError("%s: named VOR/NDB/fix not found", token)
@@ -484,33 +552,10 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		return s
 	}
 
-	// For a group [FOO] in a sector file, call the provided callback with
-	// every line of text in the group definition.
-	parsegroup := func(cb func([]byte)) []byte {
-		for {
-			line, err := p.GetLine()
-			if err == io.EOF {
-				return nil
-			} else if isGroupSeparator(line) {
-				return line
-			}
-
-			// Don't bother with the callback if the line is entirely
-			// whitespace.
-			s := 0
-			for s < len(line) && isSpace(line[s]) {
-				s++
-			}
-			if s < len(line) {
-				cb(line)
-			}
-		}
-	}
-
-	parseNamedSegments := func() (map[string]*[]Segment, []byte) {
+	parseNamedSegments := func() map[string]*[]Segment {
 		m := make(map[string]*[]Segment)
 
-		group := parsegroup(func(line []byte) {
+		for _, line := range lines {
 			f := fields(line)
 			if len(f) != 5 {
 				p.SyntaxError("Expected 5 fields for named segment")
@@ -525,35 +570,35 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				m[name] = segs
 			}
 			*segs = append(*segs, seg)
-		})
+		}
 
-		return m, group
+		return m
 	}
 
-	parseARTCC := func() ([]ARTCC, []byte) {
-		m, group := parseNamedSegments()
+	parseARTCC := func() []ARTCC {
+		m := parseNamedSegments()
 
 		var artcc []ARTCC
 		for name, segs := range m {
 			artcc = append(artcc, ARTCC{name, *segs})
 		}
-		return artcc, group
+		return artcc
 	}
-	parseAirway := func() ([]Airway, []byte) {
-		m, group := parseNamedSegments()
+	parseAirway := func() []Airway {
+		m := parseNamedSegments()
 
 		var aw []Airway
 		for name, segs := range m {
 			aw = append(aw, Airway{name, *segs})
 		}
-		return aw, group
+		return aw
 	}
 
 	// [SID], [STAR]
-	parseSidStar := func() ([]SidStar, []byte) {
+	parseSidStar := func() []SidStar {
 		var ns []SidStar
 
-		group := parsegroup(func(line []byte) {
+		for _, line := range lines {
 			if isSpace(line[0]) {
 				if len(ns) == 0 {
 					p.SyntaxError("Unexpected whitespace at start of line in SIDs/STARs")
@@ -576,195 +621,171 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				cs.Color = string(f[4])
 			}
 			ns[len(ns)-1].Segs = append(ns[len(ns)-1].Segs, cs)
-		})
-
-		return ns, group
-	}
-
-	// Process all of the [FOO] groups.
-	for group != nil {
-		switch string(group) {
-		case "[INFO]":
-			// [INFO] is special since it's a fixed number of lines in
-			// sequence, each with a fixed meaning.
-			next := func() []byte {
-				l, err := p.GetLine()
-				if err == io.EOF {
-					p.SyntaxError("Premature end of file in [INFO] block")
-				}
-				return l
-			}
-
-			sectorFile.Id = string(next())
-			sectorFile.DefaultCallsign = string(next())
-			sectorFile.DefaultAirport = string(next())
-			sectorFile.Center.Latitude = parseLatitude(next())
-			sectorFile.Center.Longitude = parseLongitude(next())
-			sectorFile.NmPerLatitude = p.atof(next())
-			sectorFile.NmPerLongitude = p.atof(next())
-			sectorFile.MagneticVariation = p.atof(next())
-			sectorFile.Scale = p.atof(next())
-
-			// advance to the next group
-			for {
-				line, err := p.GetLine()
-				if err == io.EOF {
-					group = nil
-					break
-				} else if isGroupSeparator(line) {
-					group = line
-					break
-				}
-			}
-
-		case "[VOR]":
-			// Format: name freq lat long
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 4 {
-					p.SyntaxError("Expected 4 fields")
-				}
-				name := string(f[0])
-				pos := parseloc(f[2:4])
-				sectorFile.VORs = append(sectorFile.VORs, NamedLatLong{pos, name})
-				locMap[name] = pos
-			})
-
-		case "[NDB]":
-			// Format: name freq lat long
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 4 {
-					p.SyntaxError("Expected 4 fields")
-				}
-				name := string(f[0])
-				pos := parseloc(f[2:4])
-				sectorFile.NDBs = append(sectorFile.NDBs, NamedLatLong{pos, name})
-				locMap[name] = pos
-			})
-
-		case "[AIRPORT]":
-			// Format: name freq lat long airspace
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 5 {
-					p.SyntaxError("Expected 5 fields")
-				}
-				name := string(f[0])
-				pos := parseloc(f[2:4])
-				sectorFile.Airports = append(sectorFile.Airports, NamedLatLong{pos, name})
-			})
-
-		case "[RUNWAY]":
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) < 9 {
-					p.SyntaxError("Expected at least 9 fields")
-				}
-
-				var r Runway
-				r.Number[0] = string(f[0])
-				r.Number[1] = string(f[1])
-				r.Heading[0] = p.atof(f[2])
-				r.Heading[1] = p.atof(f[3])
-				r.P[0] = parseloc(f[4:6])
-				r.P[1] = parseloc(f[6:8])
-				r.Airport = string(f[8])
-
-				sectorFile.Runways = append(sectorFile.Runways, r)
-			})
-
-		case "[FIXES]":
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 3 {
-					p.SyntaxError("Expected 3 fields")
-				}
-				name := string(f[0])
-				pos := parseloc(f[1:3])
-				sectorFile.Fixes = append(sectorFile.Fixes, NamedLatLong{pos, name})
-				locMap[name] = pos
-			})
-
-		case "[ARTCC]":
-			sectorFile.ARTCC, group = parseARTCC()
-
-		case "[ARTCC LOW]":
-			sectorFile.ARTCCLow, group = parseARTCC()
-
-		case "[ARTCC HIGH]":
-			sectorFile.ARTCCHigh, group = parseARTCC()
-
-		case "[SID]":
-			sectorFile.SIDs, group = parseSidStar()
-
-		case "[STAR]":
-			sectorFile.STARs, group = parseSidStar()
-
-		case "[LOW AIRWAY]":
-			sectorFile.LowAirways, group = parseAirway()
-
-		case "[HIGH AIRWAY]":
-			sectorFile.HighAirways, group = parseAirway()
-
-		case "[GEO]":
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 5 {
-					// WAR for error (I think) in ZNY sct file.
-					fmt.Fprintf(os.Stderr, "Skipping malformed GEO line: %s\n", line)
-					return
-				}
-
-				seg := parseseg(f[0:4])
-				sectorFile.Geo = append(sectorFile.Geo, Geo{seg, string(f[4])})
-			})
-
-		case "[REGIONS]":
-			group = parsegroup(func(line []byte) {
-				if !isSpace(line[0]) {
-					// Start a new region
-					f := fields(line)
-					sectorFile.Regions = append(sectorFile.Regions, NamedPoints{Name: string(f[0])})
-					line = line[len(f[0]):]
-				}
-
-				f := fields(line)
-				if len(f) != 2 {
-					p.SyntaxError("Expected 2 fields")
-				}
-
-				pos := parseloc(f[:2])
-				sectorFile.Regions[len(sectorFile.Regions)-1].P =
-					append(sectorFile.Regions[len(sectorFile.Regions)-1].P, pos)
-			})
-
-		case "[LABELS]":
-			group = parsegroup(func(line []byte) {
-				if line[0] != '"' {
-					p.SyntaxError("Missing opening quote for label")
-				}
-				line = line[1:]
-
-				label, rest, found := strings.Cut(string(line), "\"")
-				if !found {
-					p.SyntaxError("Unable to find closing quote for label")
-				}
-
-				f := fields([]byte(rest))
-				if len(f) != 3 {
-					p.SyntaxError("Expected 3 fields; got %+v", rest, fields)
-				}
-
-				p := parseloc(f[:2])
-				l := Label{Name: label, P: p, Color: string(f[2])}
-				sectorFile.Labels = append(sectorFile.Labels, l)
-			})
-
-		default:
-			p.SyntaxError("Unexpected group name: %s", string(group))
 		}
+
+		return ns
 	}
 
-	return sectorFile, nil
+	// Process a section [FOO]
+	switch string(section) {
+	case "[INFO]":
+		// [INFO] is special since it's a fixed number of lines in
+		// sequence, each with a fixed meaning.
+		sectorFile.Id = string(lines[0])
+		sectorFile.DefaultCallsign = string(lines[1])
+		sectorFile.DefaultAirport = string(lines[2])
+		sectorFile.Center.Latitude = parseLatitude(lines[3])
+		sectorFile.Center.Longitude = parseLongitude(lines[4])
+		sectorFile.NmPerLatitude = p.atof(lines[5])
+		sectorFile.NmPerLongitude = p.atof(lines[6])
+		sectorFile.MagneticVariation = p.atof(lines[7])
+		sectorFile.Scale = p.atof(lines[8])
+
+	case "[VOR]":
+		// Format: name freq lat long
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) != 4 {
+				p.SyntaxError("Expected 4 fields")
+			}
+			name := string(f[0])
+			pos := parseloc(f[2:4])
+			sectorFile.VORs = append(sectorFile.VORs, NamedLatLong{pos, name})
+			p.vorMap[name] = pos
+		}
+
+	case "[NDB]":
+		// Format: name freq lat long
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) != 4 {
+				p.SyntaxError("Expected 4 fields")
+			}
+			name := string(f[0])
+			pos := parseloc(f[2:4])
+			sectorFile.NDBs = append(sectorFile.NDBs, NamedLatLong{pos, name})
+			p.ndbMap[name] = pos
+		}
+
+	case "[AIRPORT]":
+		// Format: name freq lat long airspace
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) != 5 {
+				p.SyntaxError("Expected 5 fields")
+			}
+			name := string(f[0])
+			pos := parseloc(f[2:4])
+			sectorFile.Airports = append(sectorFile.Airports, NamedLatLong{pos, name})
+		}
+
+	case "[RUNWAY]":
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) < 9 {
+				p.SyntaxError("Expected at least 9 fields")
+			}
+
+			var r Runway
+			r.Number[0] = string(f[0])
+			r.Number[1] = string(f[1])
+			r.Heading[0] = p.atof(f[2])
+			r.Heading[1] = p.atof(f[3])
+			r.P[0] = parseloc(f[4:6])
+			r.P[1] = parseloc(f[6:8])
+			r.Airport = string(f[8])
+
+			sectorFile.Runways = append(sectorFile.Runways, r)
+		}
+
+	case "[FIXES]":
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) != 3 {
+				p.SyntaxError("Expected 3 fields")
+			}
+			name := string(f[0])
+			pos := parseloc(f[1:3])
+			sectorFile.Fixes = append(sectorFile.Fixes, NamedLatLong{pos, name})
+			p.fixMap[name] = pos
+		}
+
+	case "[ARTCC]":
+		sectorFile.ARTCC = parseARTCC()
+
+	case "[ARTCC LOW]":
+		sectorFile.ARTCCLow = parseARTCC()
+
+	case "[ARTCC HIGH]":
+		sectorFile.ARTCCHigh = parseARTCC()
+
+	case "[SID]":
+		sectorFile.SIDs = parseSidStar()
+
+	case "[STAR]":
+		sectorFile.STARs = parseSidStar()
+
+	case "[LOW AIRWAY]":
+		sectorFile.LowAirways = parseAirway()
+
+	case "[HIGH AIRWAY]":
+		sectorFile.HighAirways = parseAirway()
+
+	case "[GEO]":
+		for _, line := range lines {
+			f := fields(line)
+			if len(f) != 5 {
+				// WAR for error (I think) in ZNY sct file.
+				fmt.Fprintf(os.Stderr, "Skipping malformed GEO line: %s\n", line)
+				return
+			}
+
+			seg := parseseg(f[0:4])
+			sectorFile.Geo = append(sectorFile.Geo, Geo{seg, string(f[4])})
+		}
+
+	case "[REGIONS]":
+		for _, line := range lines {
+			if !isSpace(line[0]) {
+				// Start a new region
+				f := fields(line)
+				sectorFile.Regions = append(sectorFile.Regions, NamedPoints{Name: string(f[0])})
+				line = line[len(f[0]):]
+			}
+
+			f := fields(line)
+			if len(f) != 2 {
+				p.SyntaxError("Expected 2 fields")
+			}
+
+			pos := parseloc(f[:2])
+			sectorFile.Regions[len(sectorFile.Regions)-1].P =
+				append(sectorFile.Regions[len(sectorFile.Regions)-1].P, pos)
+		}
+
+	case "[LABELS]":
+		for _, line := range lines {
+			if line[0] != '"' {
+				p.SyntaxError("Missing opening quote for label")
+			}
+			line = line[1:]
+
+			label, rest, found := strings.Cut(string(line), "\"")
+			if !found {
+				p.SyntaxError("Unable to find closing quote for label")
+			}
+
+			f := fields([]byte(rest))
+			if len(f) != 3 {
+				p.SyntaxError("Expected 3 fields; got %+v", rest, fields)
+			}
+
+			p := parseloc(f[:2])
+			l := Label{Name: label, P: p, Color: string(f[2])}
+			sectorFile.Labels = append(sectorFile.Labels, l)
+		}
+
+	default:
+		p.SyntaxError("Unexpected section name: %s", string(section))
+	}
 }
