@@ -27,19 +27,19 @@ type SectorFile struct {
 	MagneticVariation float64 // Degrees of magnetic variation in this region of the world
 	Scale             float64
 
-	Colors      map[string]RGB // Colors defined via #define in the sector file
-	VORs        map[string]LatLong
-	NDBs        map[string]LatLong
-	Airports    map[string]LatLong
-	Fixes       map[string]LatLong
-	ARTCC       map[string][]Segment // ARTCC boundary
-	ARTCCLow    map[string][]Segment // Low boundary of ARTCC
-	ARTCCHigh   map[string][]Segment // High boundary of ARTCC
-	LowAirways  map[string][]Segment
-	HighAirways map[string][]Segment
-	Geo         []ColoredSegment
-	SIDs        []NamedSegments
-	STARs       []NamedSegments
+	Colors      []NamedColor // Colors defined via #define in the sector file
+	VORs        []NamedLatLong
+	NDBs        []NamedLatLong
+	Airports    []NamedLatLong
+	Fixes       []NamedLatLong
+	ARTCC       []ARTCC // ARTCC boundary
+	ARTCCLow    []ARTCC // Low boundary of ARTCC
+	ARTCCHigh   []ARTCC // High boundary of ARTCC
+	LowAirways  []Airway
+	HighAirways []Airway
+	Geo         []Geo
+	SIDs        []SidStar
+	STARs       []SidStar
 	Regions     []NamedPoints
 	Labels      []Label
 	Runways     []Runway
@@ -49,14 +49,39 @@ type RGB struct {
 	R, G, B float32
 }
 
+type NamedColor struct {
+	RGB
+	Name string
+}
+
 // LatLong encodes a position using latitude-longitude.
 type LatLong struct {
 	Latitude, Longitude float64
 }
 
+type NamedLatLong struct {
+	LatLong
+	Name string
+}
+
 // Segment represents a line segment between two positions.
 type Segment struct {
 	P [2]LatLong
+}
+
+type Geo struct {
+	Segment
+	Color string
+}
+
+type ARTCC struct {
+	Name string
+	Segs []Segment
+}
+
+type Airway struct {
+	Name string
+	Segs []Segment
 }
 
 type ColoredSegment struct {
@@ -70,9 +95,7 @@ type NamedPoints struct {
 	P    []LatLong
 }
 
-// NamedPoints represents a sequence of segments (e.g., an airway) with an
-// associated name.
-type NamedSegments struct {
+type SidStar struct {
 	Name string
 	Segs []ColoredSegment
 }
@@ -105,28 +128,28 @@ func (sf SectorFile) Write(w io.Writer) {
 	fmt.Fprintf(w, "\tScale: %f\n\n", sf.Scale)
 
 	fmt.Fprintf(w, "Named Colors:\n")
-	for name, color := range sf.Colors {
-		fmt.Fprintf(w, "\t%s: (%f, %f, %f)\n", name, color.R, color.G, color.B)
+	for _, color := range sf.Colors {
+		fmt.Fprintf(w, "\t%s: (%f, %f, %f)\n", color.Name, color.R, color.G, color.B)
 	}
 
 	fmt.Fprintf(w, "\nVORs:\n")
-	for name, vor := range sf.VORs {
-		fmt.Fprintf(w, "\t%s %s\n", name, vor)
+	for _, vor := range sf.VORs {
+		fmt.Fprintf(w, "\t%s %s\n", vor.Name, vor)
 	}
 
 	fmt.Fprintf(w, "\nNDBs:\n")
-	for name, ndb := range sf.NDBs {
-		fmt.Fprintf(w, "\t%s %s\n", name, ndb)
+	for _, ndb := range sf.NDBs {
+		fmt.Fprintf(w, "\t%s %s\n", ndb.Name, ndb)
 	}
 
 	fmt.Fprintf(w, "\nAirports:\n")
-	for name, ap := range sf.Airports {
-		fmt.Fprintf(w, "\t%s %s\n", name, ap)
+	for _, ap := range sf.Airports {
+		fmt.Fprintf(w, "\t%s %s\n", ap.Name, ap)
 	}
 
 	fmt.Fprintf(w, "\nFixes:\n")
-	for name, fix := range sf.Fixes {
-		fmt.Fprintf(w, "\t%s %s\n", name, fix)
+	for _, fix := range sf.Fixes {
+		fmt.Fprintf(w, "\t%s %s\n", fix.Name, fix)
 	}
 
 	fmt.Fprintf(w, "\nRunways:\n")
@@ -135,29 +158,41 @@ func (sf SectorFile) Write(w io.Writer) {
 			r.Number[0], r.Number[1], r.Heading[0], r.Heading[1], r.P[0], r.P[1])
 	}
 
-	printNamedSegs := func(m map[string][]Segment) {
-		for name, segs := range m {
-			fmt.Fprintf(w, "\t%s:\n", name)
-			for _, s := range segs {
-				fmt.Fprintf(w, "\t\t%s - %s\n", s.P[0], s.P[1])
-			}
+	printSegs := func(segs []Segment) {
+		for _, s := range segs {
+			fmt.Fprintf(w, "\t\t%s - %s\n", s.P[0], s.P[1])
 		}
 	}
 
 	fmt.Fprintf(w, "\nARTCC:\n")
-	printNamedSegs(sf.ARTCC)
+	for _, artcc := range sf.ARTCC {
+		fmt.Fprintf(w, "\t%s\n", artcc.Name)
+		printSegs(artcc.Segs)
+	}
 
 	fmt.Fprintf(w, "\nARTCC Low:\n")
-	printNamedSegs(sf.ARTCCLow)
+	for _, artcc := range sf.ARTCCLow {
+		fmt.Fprintf(w, "\t%s\n", artcc.Name)
+		printSegs(artcc.Segs)
+	}
 
 	fmt.Fprintf(w, "\nARTCC High:\n")
-	printNamedSegs(sf.ARTCCHigh)
+	for _, artcc := range sf.ARTCCHigh {
+		fmt.Fprintf(w, "\t%s\n", artcc.Name)
+		printSegs(artcc.Segs)
+	}
 
 	fmt.Fprintf(w, "\nLow Airways:\n")
-	printNamedSegs(sf.LowAirways)
+	for _, aw := range sf.LowAirways {
+		fmt.Fprintf(w, "\t%s\n", aw.Name)
+		printSegs(aw.Segs)
+	}
 
 	fmt.Fprintf(w, "\nHigh Airways:\n")
-	printNamedSegs(sf.HighAirways)
+	for _, aw := range sf.HighAirways {
+		fmt.Fprintf(w, "\t%s\n", aw.Name)
+		printSegs(aw.Segs)
+	}
 
 	fmt.Fprintf(w, "\nGeo:\n")
 	for _, g := range sf.Geo {
@@ -168,15 +203,15 @@ func (sf SectorFile) Write(w io.Writer) {
 	for _, sid := range sf.SIDs {
 		fmt.Fprintf(w, "\t%s:\n", sid.Name)
 		for _, seg := range sid.Segs {
-			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1], seg.Color)
+			fmt.Fprintf(w, "\t\t%s %s (%s)\n", seg.P[0], seg.P[1], seg.Color)
 		}
 	}
 
 	fmt.Fprintf(w, "\nSTARs:\n")
-	for _, sid := range sf.STARs {
-		fmt.Fprintf(w, "\t%s:\n", sid.Name)
-		for _, seg := range sid.Segs {
-			fmt.Fprintf(w, "\t\t%s %s (%f, %f, %f)\n", seg.P[0], seg.P[1], seg.Color)
+	for _, star := range sf.STARs {
+		fmt.Fprintf(w, "\t%s:\n", star.Name)
+		for _, seg := range star.Segs {
+			fmt.Fprintf(w, "\t\t%s %s (%s)\n", seg.P[0], seg.P[1], seg.Color)
 		}
 	}
 
@@ -284,21 +319,6 @@ func (p *sectorFileParser) SyntaxError(f string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func newSectorFile() *SectorFile {
-	var sf SectorFile
-	sf.Colors = make(map[string]RGB)
-	sf.VORs = make(map[string]LatLong)
-	sf.NDBs = make(map[string]LatLong)
-	sf.Airports = make(map[string]LatLong)
-	sf.Fixes = make(map[string]LatLong)
-	sf.ARTCC = make(map[string][]Segment)
-	sf.ARTCCLow = make(map[string][]Segment)
-	sf.ARTCCHigh = make(map[string][]Segment)
-	sf.LowAirways = make(map[string][]Segment)
-	sf.HighAirways = make(map[string][]Segment)
-	return &sf
-}
-
 func isGroupSeparator(s []byte) bool {
 	return len(s) > 0 && s[0] == '[' && strings.Index(string(s), "]") != -1
 }
@@ -390,9 +410,12 @@ func (p *sectorFileParser) atoi(s []byte) int {
 // callback is called with an error message.  Note that the parser does not
 // attempt to recover and continue after encountering a parsing error.
 func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, error) {
-	sectorFile := newSectorFile()
+	sectorFile := &SectorFile{}
 
-	p := &sectorFileParser{file: contents, filename: filename, errorCallback: syntax}
+	p := &sectorFileParser{file: contents,
+		filename:      filename,
+		errorCallback: syntax}
+	locMap := make(map[string]LatLong)
 
 	// Process #defines
 	var group []byte
@@ -418,16 +441,13 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			p.SyntaxError("Expected #define for first token")
 		}
 
-		sectorFile.Colors[string(f[1])] = int24ToRGB(p.atoi(f[2]))
+		nc := NamedColor{int24ToRGB(p.atoi(f[2])), string(f[1])}
+		sectorFile.Colors = append(sectorFile.Colors, nc)
 	}
 
 	vnfPos := func(t []byte) LatLong {
 		token := string(t)
-		if loc, ok := sectorFile.VORs[token]; ok {
-			return loc
-		} else if loc, ok := sectorFile.NDBs[token]; ok {
-			return loc
-		} else if loc, ok := sectorFile.Fixes[token]; ok {
+		if loc, ok := locMap[token]; ok {
 			return loc
 		} else {
 			p.SyntaxError("%s: named VOR/NDB/fix not found", token)
@@ -487,23 +507,51 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 		}
 	}
 
-	parseARTCC := func(m map[string][]Segment) []byte {
+	parseNamedSegments := func() (map[string]*[]Segment, []byte) {
+		m := make(map[string]*[]Segment)
+
 		group := parsegroup(func(line []byte) {
 			f := fields(line)
 			if len(f) != 5 {
-				p.SyntaxError("Expected 5 fields for ARTCC")
+				p.SyntaxError("Expected 5 fields for named segment")
 			}
 
 			name := string(f[0])
 			seg := parseseg(f[1:])
-			m[name] = append(m[name], seg)
+
+			segs, ok := m[name]
+			if !ok {
+				segs = &[]Segment{}
+				m[name] = segs
+			}
+			*segs = append(*segs, seg)
 		})
-		return group
+
+		return m, group
+	}
+
+	parseARTCC := func() ([]ARTCC, []byte) {
+		m, group := parseNamedSegments()
+
+		var artcc []ARTCC
+		for name, segs := range m {
+			artcc = append(artcc, ARTCC{name, *segs})
+		}
+		return artcc, group
+	}
+	parseAirway := func() ([]Airway, []byte) {
+		m, group := parseNamedSegments()
+
+		var aw []Airway
+		for name, segs := range m {
+			aw = append(aw, Airway{name, *segs})
+		}
+		return aw, group
 	}
 
 	// [SID], [STAR]
-	parseNamedSegments := func() ([]NamedSegments, []byte) {
-		var ns []NamedSegments
+	parseSidStar := func() ([]SidStar, []byte) {
+		var ns []SidStar
 
 		group := parsegroup(func(line []byte) {
 			if isSpace(line[0]) {
@@ -512,7 +560,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 			} else {
 				// First 26 characters, always (whitespace padded as needed)
-				ns = append(ns, NamedSegments{Name: strings.TrimSpace(string(line[0:26]))})
+				ns = append(ns, SidStar{Name: strings.TrimSpace(string(line[0:26]))})
 				line = line[26:]
 			}
 
@@ -578,7 +626,8 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 				name := string(f[0])
 				pos := parseloc(f[2:4])
-				sectorFile.VORs[name] = pos
+				sectorFile.VORs = append(sectorFile.VORs, NamedLatLong{pos, name})
+				locMap[name] = pos
 			})
 
 		case "[NDB]":
@@ -590,7 +639,8 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 				name := string(f[0])
 				pos := parseloc(f[2:4])
-				sectorFile.NDBs[name] = pos
+				sectorFile.NDBs = append(sectorFile.NDBs, NamedLatLong{pos, name})
+				locMap[name] = pos
 			})
 
 		case "[AIRPORT]":
@@ -602,7 +652,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 				name := string(f[0])
 				pos := parseloc(f[2:4])
-				sectorFile.Airports[name] = pos
+				sectorFile.Airports = append(sectorFile.Airports, NamedLatLong{pos, name})
 			})
 
 		case "[RUNWAY]":
@@ -632,45 +682,30 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 				name := string(f[0])
 				pos := parseloc(f[1:3])
-				sectorFile.Fixes[name] = pos
+				sectorFile.Fixes = append(sectorFile.Fixes, NamedLatLong{pos, name})
+				locMap[name] = pos
 			})
 
 		case "[ARTCC]":
-			group = parseARTCC(sectorFile.ARTCC)
+			sectorFile.ARTCC, group = parseARTCC()
 
 		case "[ARTCC LOW]":
-			group = parseARTCC(sectorFile.ARTCCLow)
+			sectorFile.ARTCCLow, group = parseARTCC()
 
 		case "[ARTCC HIGH]":
-			group = parseARTCC(sectorFile.ARTCCHigh)
+			sectorFile.ARTCCHigh, group = parseARTCC()
 
 		case "[SID]":
-			sectorFile.SIDs, group = parseNamedSegments()
+			sectorFile.SIDs, group = parseSidStar()
 
 		case "[STAR]":
-			sectorFile.STARs, group = parseNamedSegments()
+			sectorFile.STARs, group = parseSidStar()
 
 		case "[LOW AIRWAY]":
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 5 {
-					p.SyntaxError("Expected 5 fields")
-				}
-				name := string(f[0])
-				seg := parseseg(f[1:5])
-				sectorFile.LowAirways[name] = append(sectorFile.LowAirways[name], seg)
-			})
+			sectorFile.LowAirways, group = parseAirway()
 
 		case "[HIGH AIRWAY]":
-			group = parsegroup(func(line []byte) {
-				f := fields(line)
-				if len(f) != 5 {
-					p.SyntaxError("Expected 5 fields")
-				}
-				name := string(f[0])
-				seg := parseseg(f[1:5])
-				sectorFile.HighAirways[name] = append(sectorFile.HighAirways[name], seg)
-			})
+			sectorFile.HighAirways, group = parseAirway()
 
 		case "[GEO]":
 			group = parsegroup(func(line []byte) {
@@ -682,7 +717,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 				}
 
 				seg := parseseg(f[0:4])
-				sectorFile.Geo = append(sectorFile.Geo, ColoredSegment{seg, string(f[4])})
+				sectorFile.Geo = append(sectorFile.Geo, Geo{seg, string(f[4])})
 			})
 
 		case "[REGIONS]":
