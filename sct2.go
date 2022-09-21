@@ -349,13 +349,16 @@ func parseLatLong(l string) (float64, error) {
 	}
 
 	ll := 0.
-	div := 1.
-	for _, num := range strings.Split(l[1:], ".") {
-		if val, err := atof(num); err != nil {
+	div := []float64{1, 60, 60, 1000}
+	d := 1.
+	for i, num := range strings.Split(l[1:], ".") {
+		if i > len(div) {
+			return 0, fmt.Errorf("More dotted entries than expected in latlong value")
+		} else if val, err := atof(num); err != nil {
 			return 0, err
 		} else {
-			ll += val / div
-			div *= 60
+			d *= div[i]
+			ll += val / d
 		}
 	}
 
