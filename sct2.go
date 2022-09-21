@@ -595,6 +595,7 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 	// [SID], [STAR]
 	parseSidStar := func() []SidStar {
 		var ns []SidStar
+		nsIndex := -1
 
 		for _, line := range lines {
 			text := line.text
@@ -642,7 +643,19 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 					name = strings.Join(f[0:i], " ")
 					f = f[i:]
 				}
-				ns = append(ns, SidStar{Name: name})
+
+				// Does this name already exist? If so, we'll add to it.
+				nsIndex = -1
+				for i, ss := range ns {
+					if ss.Name == name {
+						nsIndex = i
+						break
+					}
+				}
+				if nsIndex == -1 {
+					nsIndex = len(ns)
+					ns = append(ns, SidStar{Name: name})
+				}
 			}
 
 			var cs ColoredSegment
@@ -655,7 +668,7 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 				if len(f) == 5 {
 					cs.Color = string(f[4])
 				}
-				ns[len(ns)-1].Segs = append(ns[len(ns)-1].Segs, cs)
+				ns[nsIndex].Segs = append(ns[nsIndex].Segs, cs)
 			}
 		}
 
