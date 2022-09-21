@@ -343,9 +343,11 @@ func isSectionSeparator(s string) bool {
 	return len(s) > 0 && s[0] == '[' && strings.Index(string(s), "]") != -1
 }
 
-func parseLatLong(l string) (float64, error) {
-	if l[0] != 'N' && l[0] != 'S' && l[0] != 'E' && l[0] != 'W' {
-		return 0, fmt.Errorf("Malformed latitude/longitude: %s", l)
+func parseLatLong(l string, isLatitude bool) (float64, error) {
+	if isLatitude && l[0] != 'N' && l[0] != 'S' {
+		return 0, fmt.Errorf("Malformed latitude: %s", l)
+	} else if !isLatitude && l[0] != 'E' && l[0] != 'W' {
+		return 0, fmt.Errorf("Malformed longitude: %s", l)
 	}
 
 	ll := 0.
@@ -509,13 +511,13 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 		if pos, err := vnfPos(token); err == nil {
 			return pos.Latitude, nil
 		}
-		return parseLatLong(token)
+		return parseLatLong(token, true)
 	}
 	parseLongitude := func(token string) (float64, error) {
 		if pos, err := vnfPos(token); err == nil {
 			return pos.Longitude, nil
 		}
-		return parseLatLong(token)
+		return parseLatLong(token, false)
 	}
 
 	parseloc := func(tokens []string) (LatLong, error) {
