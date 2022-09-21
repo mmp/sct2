@@ -443,6 +443,9 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 	for {
 		line, err := p.GetLine()
 		if err == io.EOF {
+			if len(currentSectionLines) > 0 {
+				sectionLines[strings.TrimSpace(section.text)] = currentSectionLines
+			}
 			break
 		}
 		if isSectionSeparator(line.text) {
