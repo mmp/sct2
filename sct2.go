@@ -846,6 +846,7 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 		sectorFile.HighAirways = parseAirway()
 
 	case "[GEO]":
+		geoIdx := -1
 		for _, line := range lines {
 			f := strings.Fields(line.text)
 			if len(f) < 4 {
@@ -873,19 +874,30 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 					continue
 				}
 
-				geo := Geo{Name: name}
 				if seg, err := parseseg(f[i : i+4]); err != nil {
 					p.SyntaxError(line, err.Error())
 				} else {
-					geo.Segments = append(geo.Segments, seg)
+					// Do we already have an entry for this name?
+					geoIdx = -1
+					for i, g := range sectorFile.Geo {
+						if g.Name == name {
+							geoIdx = i
+							break
+						}
+					}
+					if geoIdx == -1 {
+						geoIdx = len(sectorFile.Geo)
+						sectorFile.Geo = append(sectorFile.Geo, Geo{Name: name})
+					}
+
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, seg)
 					// Sometimes this is omitted for the name line, which
 					// usually has bogus points anyway...
+					color := ""
 					if i+4 < len(f) {
-						geo.Colors = append(geo.Colors, f[i+4])
-					} else {
-						geo.Colors = append(geo.Colors, "")
+						color = f[i+4]
 					}
-					sectorFile.Geo = append(sectorFile.Geo, geo)
+					sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, color)
 				}
 			} else {
 				// another segment for the current section
@@ -893,17 +905,17 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 					// Special case: if the first line goes straight into
 					// segments, then have an initial default section.
 					sectorFile.Geo = append(sectorFile.Geo, Geo{Name: "default"})
+					geoIdx = 0
 				}
 
-				i := len(sectorFile.Geo) - 1
 				if seg, err := parseseg(f[0:4]); err != nil {
 					p.SyntaxError(line, err.Error())
 				} else {
-					sectorFile.Geo[i].Segments = append(sectorFile.Geo[i].Segments, seg)
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, seg)
 					if len(f) >= 5 {
-						sectorFile.Geo[i].Colors = append(sectorFile.Geo[i].Colors, f[4])
+						sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, f[4])
 					} else {
-						sectorFile.Geo[i].Colors = append(sectorFile.Geo[i].Colors, "")
+						sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, "")
 					}
 				}
 			}
