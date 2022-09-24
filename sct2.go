@@ -798,7 +798,7 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 				p.SyntaxError(line, err.Error())
 				continue
 			}
-			if len(f) == 9 { // sometimes it's commented out...
+			if len(f) >= 9 { // sometimes it's commented out...
 				r.Airport = f[8]
 			}
 
