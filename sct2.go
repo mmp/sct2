@@ -81,8 +81,7 @@ type Segment struct {
 
 type Geo struct {
 	Name     string
-	Segments []Segment
-	Colors   []string
+	Segments []ColoredSegment
 }
 
 type ARTCC struct {
@@ -208,8 +207,8 @@ func (sf SectorFile) Write(w io.Writer) {
 	fmt.Fprintf(w, "\nGeo:\n")
 	for _, g := range sf.Geo {
 		fmt.Fprintf(w, "\t%s\n", g.Name)
-		for i := range g.Segments {
-			fmt.Fprintf(w, "\t\t%s - %s (%s)\n", g.Segments[i].P[0], g.Segments[i].P[1], g.Colors[i])
+		for _, seg := range g.Segments {
+			fmt.Fprintf(w, "\t\t%s - %s (%s)\n", seg.P[0], seg.P[1], seg.Color)
 		}
 	}
 
@@ -890,14 +889,14 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 						sectorFile.Geo = append(sectorFile.Geo, Geo{Name: name})
 					}
 
-					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, seg)
 					// Sometimes this is omitted for the name line, which
 					// usually has bogus points anyway...
 					color := ""
 					if i+4 < len(f) {
 						color = f[i+4]
 					}
-					sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, color)
+					cseg := ColoredSegment{Segment: seg, Color: color}
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
 				}
 			} else {
 				// another segment for the current section
@@ -911,12 +910,11 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 				if seg, err := parseseg(f[0:4]); err != nil {
 					p.SyntaxError(line, err.Error())
 				} else {
-					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, seg)
+					cseg := ColoredSegment{Segment: seg}
 					if len(f) >= 5 {
-						sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, f[4])
-					} else {
-						sectorFile.Geo[geoIdx].Colors = append(sectorFile.Geo[geoIdx].Colors, "")
+						cseg.Color = f[4]
 					}
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
 				}
 			}
 		}
