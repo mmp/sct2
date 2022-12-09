@@ -349,32 +349,49 @@ func isSectionSeparator(s string) bool {
 	return len(s) > 0 && s[0] == '[' && strings.Contains(string(s), "]")
 }
 
-func parseLatLong(l string, isLatitude bool) (float64, error) {
-	if isLatitude && l[0] != 'N' && l[0] != 'S' {
-		return 0, ErrBadLatLong
-	} else if !isLatitude && l[0] != 'E' && l[0] != 'W' {
+func parseLatLong(l string) (ll float64, err error) {
+	if l[0] != 'N' && l[0] != 'S' && l[0] != 'E' && l[0] != 'W' {
 		return 0, ErrBadLatLong
 	}
 
-	ll := 0.
-	div := []float64{1, 60, 60, 1000}
-	d := 1.
-	for i, num := range strings.Split(l[1:], ".") {
-		if i >= len(div) {
-			return 0, ErrBadLatLong
-		} else if val, err := strconv.Atoi(num); err != nil {
-			return 0, err
-		} else {
-			d *= div[i]
-			ll += float64(val) / d
+	bytes := []byte(l)
+	idx := 1
+	parseInt := func() (value int, digits int) {
+		for idx < len(bytes) && bytes[idx] != '.' {
+			value *= 10
+			digit := int(bytes[idx] - '0')
+			if digit < 0 || digit > 9 {
+				err = ErrBadLatLong
+			}
+			value += digit
+			idx++
+			digits++
 		}
+		return
 	}
+
+	// Get the whole degrees up to the first "."
+	value, _ := parseInt()
+	ll = float64(value)
+	idx++ // skip .
+	value, _ = parseInt()
+	ll += float64(value) / 60
+	idx++ // skip .
+	value, _ = parseInt()
+	ll += float64(value) / 3600
+	idx++ // skip .
+	value, digits := parseInt()
+	for digits < 3 {
+		digits++
+		value *= 10
+	}
+	ll += float64(value) / 3600000
 
 	if l[0] == 'S' || l[0] == 'W' {
 		ll = -ll
 	}
 
-	return ll, nil
+	return
 }
 
 func isSpace(c byte) bool {
@@ -383,10 +400,6 @@ func isSpace(c byte) bool {
 
 func atof(s string) (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(s), 64)
-}
-
-func atoi(s string) (int, error) {
-	return strconv.Atoi(strings.TrimSpace(s))
 }
 
 // Parses the provided contents, which are assumed to be a SCT2 format
@@ -433,7 +446,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			continue
 		}
 
-		if irgb, err := atoi(f[2]); err != nil {
+		if irgb, err := strconv.Atoi(strings.TrimSpace(f[2])); err != nil {
 			p.SyntaxError(line, err.Error())
 		} else {
 			nc := NamedColor{int24ToRGB(irgb), f[1]}
@@ -537,24 +550,24 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 	}
 	parseLatitude := func(token string) (float64, error) {
 		if len(token) > 5 &&
-			((token[0] == 'N' || token[0] == 'n' || token[0] == 'S' || token[0] == 's') && isDigit(token[1])) {
-			// it's definitely a numeric latitude
-			return parseLatLong(token, true)
+			((token[0] == 'N' || token[0] == 'S' || token[0] == 'E' || token[0] == 'W') &&
+				isDigit(token[1])) {
+			return parseLatLong(token)
 		} else if pos, err := vnfPos(token); err == nil {
 			return pos.Latitude, nil
 		} else {
-			return parseLatLong(token, true)
+			return parseLatLong(token)
 		}
 	}
 	parseLongitude := func(token string) (float64, error) {
 		if len(token) > 5 &&
-			((token[0] == 'E' || token[0] == 'e' || token[0] == 'W' || token[0] == 'w') &&
+			((token[0] == 'N' || token[0] == 'S' || token[0] == 'E' || token[0] == 'W') &&
 				isDigit(token[1])) {
-			return parseLatLong(token, false)
+			return parseLatLong(token)
 		} else if pos, err := vnfPos(token); err == nil {
 			return pos.Longitude, nil
 		} else {
-			return parseLatLong(token, false)
+			return parseLatLong(token)
 		}
 	}
 
