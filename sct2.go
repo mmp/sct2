@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"golang.org/x/exp/constraints"
 )
 
 /* Open issues:
@@ -490,6 +493,22 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 	return sectorFile, nil
 }
 
+func flattenMap[K comparable, V any](m map[K]V) ([]K, []V) {
+	keys := make([]K, 0, len(m))
+	values := make([]V, 0, len(m))
+	for k, v := range m {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+	return keys, values
+}
+
+func sortedMapKeys[K constraints.Ordered, V any](m map[K]V) []K {
+	keys, _ := flattenMap(m)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
 func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFile *SectorFile) {
 	vnfPos := func(token string) (LatLong, error) {
 		p.mapMutex.Lock()
@@ -576,8 +595,8 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 		m := parseNamedSegments()
 
 		var artcc []ARTCC
-		for name, segs := range m {
-			artcc = append(artcc, ARTCC{name, *segs})
+		for _, name := range sortedMapKeys(m) {
+			artcc = append(artcc, ARTCC{name, *m[name]})
 		}
 		return artcc
 	}
@@ -585,8 +604,8 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 		m := parseNamedSegments()
 
 		var aw []Airway
-		for name, segs := range m {
-			aw = append(aw, Airway{name, *segs})
+		for _, name := range sortedMapKeys(m) {
+			aw = append(aw, Airway{name, *m[name]})
 		}
 		return aw
 	}
