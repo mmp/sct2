@@ -296,7 +296,6 @@ type sectorFileParser struct {
 	filename                           string
 	offset                             int
 	lineno                             int
-	lines                              []sctLine
 	vorMap, ndbMap, fixMap, airportMap map[string]LatLong
 	mapMutex                           sync.Mutex
 	errorCallback                      func(string)
@@ -342,7 +341,7 @@ func (p *sectorFileParser) SyntaxError(l sctLine, f string, args ...interface{})
 }
 
 func isSectionSeparator(s string) bool {
-	return len(s) > 0 && s[0] == '[' && strings.Index(string(s), "]") != -1
+	return len(s) > 0 && s[0] == '[' && strings.Contains(string(s), "]")
 }
 
 func parseLatLong(l string, isLatitude bool) (float64, error) {
@@ -978,7 +977,7 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 
 			f := strings.Fields(rest)
 			if len(f) != 3 {
-				p.SyntaxError(line, "Expected 3 fields; got %+v", rest, f)
+				p.SyntaxError(line, "Expected 3 fields; got %v", f)
 				continue
 			}
 
