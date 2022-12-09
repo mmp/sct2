@@ -8,15 +8,34 @@ Usage:
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/mmp/sct2"
 )
 
+var (
+	profile = flag.Bool("profile", false, "write cpu.prof file")
+)
+
 func main() {
-	for _, fn := range os.Args[1:] {
+	flag.Parse()
+	if *profile {
+		if f, err := os.Create("cpu.prof"); err != nil {
+			fmt.Printf("%s: unable to create CPU profile file: %v", "cpu.prof", err)
+		} else {
+			if err = pprof.StartCPUProfile(f); err != nil {
+				fmt.Printf("unable to start CPU profile: %v", err)
+			} else {
+				defer pprof.StopCPUProfile()
+			}
+		}
+	}
+
+	for _, fn := range flag.Args() {
 		contents, err := os.ReadFile(fn)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %s", fn, err)
@@ -32,7 +51,9 @@ func main() {
 		} else {
 			elapsed := time.Since(start)
 			fmt.Printf("Parsed file in %s\n", elapsed)
-			sf.Write(os.Stdout)
+			if !*profile {
+				sf.Write(os.Stdout)
+			}
 		}
 	}
 }
