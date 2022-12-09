@@ -7,6 +7,7 @@
 package sct2
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,6 +17,10 @@ import (
 	"sync"
 
 	"golang.org/x/exp/constraints"
+)
+
+var (
+	ErrBadLatLong = errors.New("Malformed latitude/longitude")
 )
 
 /* Open issues:
@@ -346,22 +351,22 @@ func isSectionSeparator(s string) bool {
 
 func parseLatLong(l string, isLatitude bool) (float64, error) {
 	if isLatitude && l[0] != 'N' && l[0] != 'S' {
-		return 0, fmt.Errorf("Malformed latitude: %s", l)
+		return 0, ErrBadLatLong
 	} else if !isLatitude && l[0] != 'E' && l[0] != 'W' {
-		return 0, fmt.Errorf("Malformed longitude: %s", l)
+		return 0, ErrBadLatLong
 	}
 
 	ll := 0.
 	div := []float64{1, 60, 60, 1000}
 	d := 1.
 	for i, num := range strings.Split(l[1:], ".") {
-		if i > len(div) {
-			return 0, fmt.Errorf("More dotted entries than expected in latlong value")
-		} else if val, err := atof(num); err != nil {
+		if i >= len(div) {
+			return 0, ErrBadLatLong
+		} else if val, err := strconv.Atoi(num); err != nil {
 			return 0, err
 		} else {
 			d *= div[i]
-			ll += val / d
+			ll += float64(val) / d
 		}
 	}
 
@@ -527,17 +532,30 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 	}
 
 	// handle a VOR, NDB, fix, or an actual numeric position...
+	isDigit := func(d byte) bool {
+		return d >= '0' && d <= '9'
+	}
 	parseLatitude := func(token string) (float64, error) {
-		if pos, err := vnfPos(token); err == nil {
+		if len(token) > 5 &&
+			((token[0] == 'N' || token[0] == 'n' || token[0] == 'S' || token[0] == 's') && isDigit(token[1])) {
+			// it's definitely a numeric latitude
+			return parseLatLong(token, true)
+		} else if pos, err := vnfPos(token); err == nil {
 			return pos.Latitude, nil
+		} else {
+			return parseLatLong(token, true)
 		}
-		return parseLatLong(token, true)
 	}
 	parseLongitude := func(token string) (float64, error) {
-		if pos, err := vnfPos(token); err == nil {
+		if len(token) > 5 &&
+			((token[0] == 'E' || token[0] == 'e' || token[0] == 'W' || token[0] == 'w') &&
+				isDigit(token[1])) {
+			return parseLatLong(token, false)
+		} else if pos, err := vnfPos(token); err == nil {
 			return pos.Longitude, nil
+		} else {
+			return parseLatLong(token, false)
 		}
-		return parseLatLong(token, false)
 	}
 
 	parseloc := func(tokens []string) (LatLong, error) {
@@ -698,13 +716,13 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 		// [INFO] is special since it's a fixed number of lines in
 		// sequence, each with a fixed meaning.
 		var err error
-		sectorFile.Id = lines[0].text
-		sectorFile.DefaultCallsign = lines[1].text
-		sectorFile.DefaultAirport = lines[2].text
-		if sectorFile.Center.Latitude, err = parseLatitude(lines[3].text); err != nil {
+		sectorFile.Id = strings.TrimSpace(lines[0].text)
+		sectorFile.DefaultCallsign = strings.TrimSpace(lines[1].text)
+		sectorFile.DefaultAirport = strings.TrimSpace(lines[2].text)
+		if sectorFile.Center.Latitude, err = parseLatitude(strings.TrimSpace(lines[3].text)); err != nil {
 			p.SyntaxError(lines[3], err.Error())
 		}
-		if sectorFile.Center.Longitude, err = parseLongitude(lines[4].text); err != nil {
+		if sectorFile.Center.Longitude, err = parseLongitude(strings.TrimSpace(lines[4].text)); err != nil {
 			p.SyntaxError(lines[4], err.Error())
 		}
 		if sectorFile.NmPerLatitude, err = atof(lines[5].text); err != nil {
