@@ -882,76 +882,71 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 
 	case "[GEO]":
 		geoIdx := -1
-		for _, line := range lines {
-			f := strings.Fields(line.text)
-			if len(f) < 4 {
-				p.SyntaxError(line, "Skipping malformed GEO line")
-				continue
+
+		getIndex := func(name string) int {
+			for i, g := range sectorFile.Geo {
+				if g.Name == name {
+					return i
+				}
 			}
 
-			if _, err := parseseg(f[0:4]); err != nil {
-				// start of a new section; there may be spaces in the name,
-				// so keep going until we find a latitude
-				name := ""
-				var i int
-				for i = 0; i+4 <= len(f); i++ {
-					if _, err := parseseg(f[i : i+4]); err == nil {
-						break
-					}
-					if i > 0 {
-						name = name + " "
-					}
-					name = name + f[i]
-				}
+			// Not found
+			i := len(sectorFile.Geo)
+			sectorFile.Geo = append(sectorFile.Geo, Geo{Name: name})
+			return i
+		}
 
-				if i+4 > len(f) {
-					p.SyntaxError(line, "Segment not found after name \"%s\"?", name)
-					continue
-				}
-
-				if seg, err := parseseg(f[i : i+4]); err != nil {
+		for _, line := range lines {
+			f := strings.Fields(line.text)
+			switch len(f) {
+			case 6:
+				// Expect Geo name, 4x lat-long, color
+				geoIdx = getIndex(f[0])
+				if seg, err := parseseg(f[1:5]); err != nil {
 					p.SyntaxError(line, err.Error())
 				} else {
-					// Do we already have an entry for this name?
-					geoIdx = -1
-					for i, g := range sectorFile.Geo {
-						if g.Name == name {
-							geoIdx = i
-							break
-						}
-					}
-					if geoIdx == -1 {
-						geoIdx = len(sectorFile.Geo)
-						sectorFile.Geo = append(sectorFile.Geo, Geo{Name: name})
-					}
-
-					// Sometimes this is omitted for the name line, which
-					// usually has bogus points anyway...
-					color := ""
-					if i+4 < len(f) {
-						color = f[i+4]
-					}
-					cseg := ColoredSegment{Segment: seg, Color: color}
+					cseg := ColoredSegment{Segment: seg, Color: f[5]}
 					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
 				}
-			} else {
-				// another segment for the current section
-				if len(sectorFile.Geo) == 0 {
-					// Special case: if the first line goes straight into
-					// segments, then have an initial default section.
-					sectorFile.Geo = append(sectorFile.Geo, Geo{Name: "default"})
-					geoIdx = 0
+
+			case 5:
+				// Tricky: may be Geo name + 4x latlong, or may be 4x latlong + color
+				// Strictly speaking this is ambiguous, since say there is a fix named
+				// COAST (I'm looking at you, NZ), then we could have a Geo line like:
+				// COAST COAST COAST COAST COAST
+				if seg, err := parseseg(f[1:5]); err == nil {
+					geoIdx = getIndex(f[0])
+					cseg := ColoredSegment{Segment: seg}
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
+				} else if seg, err := parseseg(f[0:4]); err == nil {
+					if len(sectorFile.Geo) == 0 {
+						// Special case: if the first line goes straight into
+						// segments, then have an initial default section.
+						sectorFile.Geo = append(sectorFile.Geo, Geo{Name: "default"})
+						geoIdx = 0
+					}
+					cseg := ColoredSegment{Segment: seg, Color: f[4]}
+					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
 				}
 
+			case 4:
+				// another segment for the current section
+				// Expect 4x lat long
 				if seg, err := parseseg(f[0:4]); err != nil {
 					p.SyntaxError(line, err.Error())
 				} else {
-					cseg := ColoredSegment{Segment: seg}
-					if len(f) >= 5 {
-						cseg.Color = f[4]
+					if len(sectorFile.Geo) == 0 {
+						// Special case: if the first line goes straight into
+						// segments, then have an initial default section.
+						sectorFile.Geo = append(sectorFile.Geo, Geo{Name: "default"})
+						geoIdx = 0
 					}
+					cseg := ColoredSegment{Segment: seg}
 					sectorFile.Geo[geoIdx].Segments = append(sectorFile.Geo[geoIdx].Segments, cseg)
 				}
+
+			default:
+				p.SyntaxError(line, "Skipping malformed GEO line")
 			}
 		}
 
