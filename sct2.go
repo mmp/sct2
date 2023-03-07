@@ -346,7 +346,7 @@ func (p *sectorFileParser) SyntaxError(l sctLine, f string, args ...interface{})
 }
 
 func isSectionSeparator(s string) bool {
-	return len(s) > 0 && s[0] == '[' && strings.Contains(string(s), "]")
+	return len(s) > 0 && s[0] == '[' && strings.Contains(s, "]")
 }
 
 func parseLatLong(l string) (ll float64, err error) {
@@ -427,7 +427,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 			p.SyntaxError(line, "Premature EOF in #defines")
 			break
 		}
-		if len(line.text) == 0 {
+		if ns := strings.TrimSpace(line.text); len(ns) == 0 || ns[0] == ';' {
 			continue
 		}
 		if isSectionSeparator(line.text) {
@@ -438,7 +438,7 @@ func Parse(contents []byte, filename string, syntax func(string)) (*SectorFile, 
 
 		f := strings.Fields(line.text)
 		if len(f) != 3 {
-			p.SyntaxError(line, "Expected 3 fields: %+v", f)
+			p.SyntaxError(line, "Expected 3 fields: \"%s\" %+v", line.text, f)
 			continue
 		}
 		if f[0] != "#define" {
@@ -704,6 +704,11 @@ func parseSection(section string, lines []sctLine, p *sectorFileParser, sectorFi
 					nsIndex = len(ns)
 					ns = append(ns, SidStar{Name: name})
 				}
+			}
+
+			if len(f) < 4 {
+				p.SyntaxError(line, "Expected at least 4 fields")
+				continue
 			}
 
 			var cs ColoredSegment
